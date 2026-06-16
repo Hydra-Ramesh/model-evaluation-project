@@ -9,8 +9,16 @@ class EvaluationEngine:
     Uses sentence-transformers for semantic similarity.
     """
     def __init__(self, embedding_model_name: str = "all-MiniLM-L6-v2"):
-        # Load a lightweight embedding model for semantic similarity / BERTScore approximation
-        self.embedding_model = SentenceTransformer(embedding_model_name)
+        # We lazily load the model so it doesn't block Uvicorn startup
+        self.embedding_model_name = embedding_model_name
+        self._embedding_model = None
+
+    @property
+    def embedding_model(self):
+        if self._embedding_model is None:
+            # Model is downloaded/loaded into memory only on the first API request
+            self._embedding_model = SentenceTransformer(self.embedding_model_name)
+        return self._embedding_model
 
     def exact_match(self, prediction: str, reference: str) -> bool:
         """Strict string exact match."""
