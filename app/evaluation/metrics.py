@@ -1,6 +1,5 @@
 import numpy as np
 from typing import Dict, Any
-from sentence_transformers import SentenceTransformer
 from scipy.spatial.distance import cosine
 
 class EvaluationEngine:
@@ -16,6 +15,8 @@ class EvaluationEngine:
     @property
     def embedding_model(self):
         if self._embedding_model is None:
+            # Lazy import to save 400MB of RAM on startup!
+            from sentence_transformers import SentenceTransformer
             # Model is downloaded/loaded into memory only on the first API request
             self._embedding_model = SentenceTransformer(self.embedding_model_name)
         return self._embedding_model
