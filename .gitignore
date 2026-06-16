@@ -1,0 +1,40 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Mac OS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Database
+# Ignore the local SQLite database as it contains huge amounts of telemetry
+llm_eval.db
+llm_eval.db-journal
+
+# ML Artifacts
+# Ignore the generated models, csv clusters, and SHAP plots to save repo space
+data/*.pkl
+data/*.csv
+data/*.png
+data/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Misc
+*.log
