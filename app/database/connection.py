@@ -1,8 +1,11 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
+from dotenv import load_dotenv
 
-# We would normally load this from env using pydantic-settings
+# Load environment variables if .env exists
+load_dotenv()
+
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./llm_eval.db")
 
 if DATABASE_URL.startswith("sqlite"):

@@ -11,13 +11,16 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import numpy as np
-import sqlite3
 import traceback
+import requests
 
 # Streamlit App Configuration
 st.set_page_config(page_title="LLM Evaluation Platform", layout="wide")
 
 st.title("LLM Evaluation & Benchmarking Platform 🚀")
+
+# API Configuration
+BACKEND_API_URL = os.getenv("BACKEND_API_URL", "http://localhost:8000").rstrip("/")
 
 # Sidebar for navigation
 page = st.sidebar.selectbox(
@@ -35,43 +38,33 @@ page = st.sidebar.selectbox(
     ]
 )
 
-def get_db_path():
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), '../../llm_eval.db'))
-
 def get_real_leaderboard():
     try:
-        conn = sqlite3.connect(get_db_path())
-        df = pd.read_sql("""
-            SELECT m.name as Model, 
-                   SUM(CASE WHEN e.exact_match = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as "Avg Accuracy (%)"
-            FROM evaluation_results e
-            JOIN responses r ON e.response_id = r.id
-            JOIN benchmark_runs b ON r.run_id = b.id
-            JOIN models m ON b.model_id = m.id
-            GROUP BY m.name
-            ORDER BY "Avg Accuracy (%)" DESC
-        """, conn)
-        df["Elo Rating"] = 1500 + (df["Avg Accuracy (%)"] - 50) * 10
-        return df
+        response = requests.get(f"{BACKEND_API_URL}/api/v1/leaderboard", timeout=10)
+        if response.status_code == 200:
+            df = pd.DataFrame(response.json())
+            if df.empty:
+                return pd.DataFrame({"Model": ["No Data"], "Elo Rating": [1500], "Avg Accuracy (%)": [50.0]})
+            # Ensure proper columns exist in output
+            if "Model" not in df.columns:
+                df = df.rename(columns={"model": "Model"})
+            return df
+        else:
+            return pd.DataFrame({"Model": ["No Data"], "Elo Rating": [1500], "Avg Accuracy (%)": [50.0]})
     except Exception as e:
         return pd.DataFrame({"Model": ["No Data"], "Elo Rating": [1500], "Avg Accuracy (%)": [50.0]})
 
 def get_real_cost_data():
     try:
-        conn = sqlite3.connect(get_db_path())
-        df = pd.read_sql("""
-            SELECT m.name as Model, 
-                   AVG(CAST(json_extract(e.custom_metrics, '$.cost') AS FLOAT)) * 1000 as "Cost per 1k Tokens ($)",
-                   SUM(CASE WHEN e.exact_match = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as "Avg Accuracy (%)"
-            FROM evaluation_results e
-            JOIN responses r ON e.response_id = r.id
-            JOIN benchmark_runs b ON r.run_id = b.id
-            JOIN models m ON b.model_id = m.id
-            GROUP BY m.name
-        """, conn)
-        return df
+        response = requests.get(f"{BACKEND_API_URL}/api/v1/cost-performance", timeout=10)
+        if response.status_code == 200:
+            df = pd.DataFrame(response.json())
+            if df.empty:
+                return pd.DataFrame({"Model": ["No Data"], "Cost per 1k Tokens ($)": [0.0], "Avg Accuracy (%)": [50.0]})
+            return df
+        else:
+            return pd.DataFrame({"Model": ["No Data"], "Cost per 1k Tokens ($)": [0.0], "Avg Accuracy (%)": [50.0]})
     except Exception as e:
-        st.error(f"SQL Error: {e}\n{traceback.format_exc()}")
         return pd.DataFrame({"Model": ["No Data"], "Cost per 1k Tokens ($)": [0.0], "Avg Accuracy (%)": [50.0]})
 
 # --- PAGE ROUTING ---
@@ -82,10 +75,12 @@ if page == "Overview":
     
     col1, col2, col3 = st.columns(3)
     try:
-        conn = sqlite3.connect(get_db_path())
-        c1 = pd.read_sql("SELECT COUNT(*) as c FROM models", conn).iloc[0]['c']
-        c2 = pd.read_sql("SELECT COUNT(*) as c FROM benchmark_runs", conn).iloc[0]['c']
-        c3 = pd.read_sql("SELECT COUNT(*) as c FROM questions", conn).iloc[0]['c']
+        response = requests.get(f"{BACKEND_API_URL}/api/v1/overview", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            c1, c2, c3 = data["models"], data["runs"], data["questions"]
+        else:
+            c1, c2, c3 = 5, 1240, 125000
     except:
         c1, c2, c3 = 5, 1240, 125000
     
@@ -104,9 +99,13 @@ elif page == "Experiment Comparison":
     st.header("Experiment Comparison")
     st.write("Compare side-by-side execution metrics across two or more model experiments.")
     try:
-        conn = sqlite3.connect(get_db_path())
-        models_df = pd.read_sql("SELECT name FROM models ORDER BY name", conn)
-        model_names = models_df['name'].tolist()
+        response_models = requests.get(f"{BACKEND_API_URL}/api/v1/models", timeout=10)
+        if response_models.status_code == 200:
+            models_data = response_models.json()
+            model_names = [m["name"] for m in models_data]
+        else:
+            model_names = []
+            
         if len(model_names) >= 2:
             col1, col2 = st.columns(2)
             with col1:
@@ -115,18 +114,14 @@ elif page == "Experiment Comparison":
                 mod2 = st.selectbox("Select Model 2 (Comparison)", model_names, index=1)
                 
             def get_model_stats(m_name):
-                return pd.read_sql(f"""
-                    SELECT 
-                        AVG(r.latency_ms) / 1000.0 as avg_lat,
-                        SUM(CASE WHEN e.exact_match = 1 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as acc,
-                        AVG(CAST(json_extract(e.custom_metrics, '$.cost') AS FLOAT)) * 1000 as cost_1k,
-                        AVG(CAST(json_extract(e.custom_metrics, '$.hallucination_detected') AS FLOAT)) * 100.0 as hal_rate
-                    FROM evaluation_results e
-                    JOIN responses r ON e.response_id = r.id
-                    JOIN benchmark_runs b ON r.run_id = b.id
-                    JOIN models m ON b.model_id = m.id
-                    WHERE m.name = '{m_name}'
-                """, conn).iloc[0]
+                try:
+                    res_stats = requests.get(f"{BACKEND_API_URL}/api/v1/model-stats/{m_name}", timeout=10)
+                    if res_stats.status_code == 200:
+                        return res_stats.json()
+                    else:
+                        return {"avg_lat": 0.0, "acc": 0.0, "cost_1k": 0.0, "hal_rate": 0.0}
+                except:
+                    return {"avg_lat": 0.0, "acc": 0.0, "cost_1k": 0.0, "hal_rate": 0.0}
 
             stat1 = get_model_stats(mod1)
             stat2 = get_model_stats(mod2)
@@ -185,29 +180,29 @@ elif page == "Hallucination Analysis":
     st.write("Violin plots displaying the probability distribution of hallucinations detected by the LLM-as-a-Judge pipeline.")
     
     try:
-        conn = sqlite3.connect(get_db_path())
-        df_hal = pd.read_sql("""
-            SELECT m.name as Model, 
-                   json_extract(e.custom_metrics, '$.hallucination_detected') as is_hal
-            FROM evaluation_results e
-            JOIN responses r ON e.response_id = r.id
-            JOIN benchmark_runs b ON r.run_id = b.id
-            JOIN models m ON b.model_id = m.id
-            WHERE is_hal IS NOT NULL
-        """, conn)
-        hal_rates = df_hal.groupby('Model')['is_hal'].mean().reset_index()
-        fig = px.bar(hal_rates, x="Model", y="is_hal", title="Hallucination Rates by Model", color="Model")
-        fig.update_layout(yaxis_title="Probability of Hallucination")
-        st.plotly_chart(fig, use_container_width=True)
-    except:
-        st.warning("No hallucination data available.")
+        response = requests.get(f"{BACKEND_API_URL}/api/v1/hallucinations", timeout=10)
+        if response.status_code == 200:
+            df_hal = pd.DataFrame(response.json())
+            if not df_hal.empty:
+                # Rename columns from JSON format if necessary
+                if "Model" not in df_hal.columns and "model" in df_hal.columns:
+                    df_hal = df_hal.rename(columns={"model": "Model"})
+                hal_rates = df_hal.groupby('Model')['is_hal'].mean().reset_index()
+                fig = px.bar(hal_rates, x="Model", y="is_hal", title="Hallucination Rates by Model", color="Model")
+                fig.update_layout(yaxis_title="Probability of Hallucination")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("No hallucination data available.")
+        else:
+            st.warning("No hallucination data available from API.")
+    except Exception as e:
+        st.warning(f"No hallucination data available: {e}")
 
 elif page == "Error Analysis":
     st.header("Failure Mode Clustering (K-Means)")
     st.write("Questions that the models frequently fail on are embedded and clustered to reveal systemic weaknesses.")
     
     try:
-        import os
         if os.path.exists("data/error_clusters.csv"):
             err_df = pd.read_csv("data/error_clusters.csv")
             clusters = err_df['cluster_label'].dropna().unique()
@@ -229,10 +224,6 @@ elif page == "Error Analysis":
 elif page == "Predictive Models (ML)":
     st.header("Secondary ML Predictors")
     st.write("Interact with the trained secondary ML models (XGBoost, LightGBM, CatBoost) to forecast metrics before executing LLM generation.")
-    
-    import os
-    import sys
-    sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
     
     tab1, tab2, tab3 = st.tabs(["Hallucination Detector", "Failure Risk", "Cost/Latency Forecasting"])
     
@@ -299,7 +290,6 @@ elif page == "Predictive Models (ML)":
 elif page == "SHAP Analytics":
     st.header("Explainable AI (SHAP)")
     st.write("Understand the driving features behind our secondary ML model predictions.")
-    import os
     if os.path.exists("data/shap_summary.png"):
         st.image("data/shap_summary.png", use_column_width=True)
     else:
