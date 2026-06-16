@@ -24,11 +24,10 @@ llm_eval.db
 llm_eval.db-journal
 
 # ML Artifacts
-# Ignore the generated models, csv clusters, and SHAP plots to save repo space
-data/*.pkl
+# We must commit .pkl files so Streamlit Cloud and Render can load the ML models!
+# Ignore only the huge generated clusters and images
 data/*.csv
 data/*.png
-data/
 
 # IDE / Editor
 .vscode/
