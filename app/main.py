@@ -2,8 +2,18 @@ from fastapi import FastAPI
 from app.api.endpoints import router as api_router
 from app.database.connection import engine, Base
 
+import sys
+import traceback
+
 # Ensure all database tables are created synchronously on startup
-Base.metadata.create_all(bind=engine)
+try:
+    print("Attempting to connect to database and create tables...", flush=True)
+    Base.metadata.create_all(bind=engine)
+    print("Database tables created successfully!", flush=True)
+except Exception as e:
+    print(f"CRITICAL ERROR DURING DATABASE INITIALIZATION: {str(e)}", flush=True)
+    traceback.print_exc(file=sys.stdout)
+    sys.stdout.flush()
 
 app = FastAPI(
     title="LLM Evaluation & Benchmarking Platform API",
